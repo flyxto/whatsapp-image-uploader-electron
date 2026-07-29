@@ -784,8 +784,18 @@ ipcMain.handle('save-event-config', async (_, data) => {
   return { success: true };
 });
 
+async function waitForDbConnection(timeoutMs = 5000) {
+  if (dbConnected && mongoClient) return true;
+  const startTime = Date.now();
+  while (!dbConnected && (Date.now() - startTime) < timeoutMs) {
+    await new Promise(r => setTimeout(r, 100));
+  }
+  return dbConnected && !!mongoClient;
+}
+
 ipcMain.handle('get-all-events', async () => {
-  if (!dbConnected || !mongoClient) return [];
+  const isConnected = await waitForDbConnection(5000);
+  if (!isConnected) return [];
   try {
     const db = mongoClient.db();
     const configCol = db.collection('event_config');
@@ -794,12 +804,22 @@ ipcMain.handle('get-all-events', async () => {
       .find({ _id: { $ne: 'active_event' } })
       .sort({ updatedAt: -1 })
       .toArray();
-    return events
-      .filter(e => e.eventName && e.eventPrefix)
-      .map(e => ({
-        eventName: e.eventName || '',
-        eventPrefix: e.eventPrefix || '',
-      }));
+
+    const seen = new Set();
+    const uniqueEvents = [];
+    for (const e of events) {
+      if (e.eventName && e.eventPrefix) {
+        const key = e.eventPrefix.toUpperCase().trim();
+        if (!seen.has(key)) {
+          seen.add(key);
+          uniqueEvents.push({
+            eventName: e.eventName.trim(),
+            eventPrefix: key,
+          });
+        }
+      }
+    }
+    return uniqueEvents;
   } catch (err) {
     log('error', `⚠️ Failed to get all events: ${err.message}`);
     return [];

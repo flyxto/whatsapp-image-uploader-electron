@@ -438,7 +438,10 @@ window.api.onLog((data) => appendLog(data));
 window.api.onDbStatus(({ connected, error }) => {
   dbDot.className = `status-dot ${connected ? 'connected' : 'disconnected'}`;
   dbStatusText.textContent = connected ? 'Connected' : (error ? 'Error' : 'Disconnected');
-  if (connected) refreshStats();
+  if (connected) {
+    refreshStats();
+    populateSidebarEvents();
+  }
 });
 
 window.api.onImageStatus(({ imageId, status, user, imageUrl, error, previewUrl, filePath, phone, hide }) => {
@@ -649,38 +652,72 @@ function updateSidebarSelectState() {
   }
 }
 
+let isPopulatingSidebarEvents = false;
+
 async function populateSidebarEvents() {
   if (!sidebarEventSelect) return;
+  if (isPopulatingSidebarEvents) return;
+  isPopulatingSidebarEvents = true;
+
   try {
-    // Preserve default choices
+    const [config, events] = await Promise.all([
+      window.api.getEventConfig().catch(() => ({})),
+      window.api.getAllEvents().catch(() => [])
+    ]);
+
+    const activePrefix = (config.eventPrefix || '').toUpperCase();
+
+    // Reset innerHTML synchronously right before appending
     sidebarEventSelect.innerHTML = `
       <option value="">-- No Active Event --</option>
       <option value="__create_new__">+ Create New Event...</option>
     `;
 
-    const events = await window.api.getAllEvents();
+    let foundActive = false;
     if (events && events.length > 0) {
+      const seen = new Set();
       for (const ev of events) {
+        if (!ev || !ev.eventPrefix) continue;
+        const prefixUpper = ev.eventPrefix.toUpperCase();
+        if (seen.has(prefixUpper)) continue;
+        seen.add(prefixUpper);
+
         const opt = document.createElement('option');
-        opt.value = ev.eventPrefix;
-        opt.textContent = `${ev.eventName} (${ev.eventPrefix})`;
+        opt.value = prefixUpper;
+        opt.textContent = `${ev.eventName} (${prefixUpper})`;
         opt.setAttribute('data-name', ev.eventName);
+        if (prefixUpper === activePrefix) {
+          foundActive = true;
+        }
         sidebarEventSelect.appendChild(opt);
       }
     }
+
+    if (foundActive && activePrefix) {
+      sidebarEventSelect.value = activePrefix;
+      eventCreated = true;
+    } else {
+      sidebarEventSelect.value = '';
+      eventCreated = false;
+    }
+
+    updateWatchButtonState();
+    updateSidebarSelectState();
+    updateEmptyState();
   } catch (err) {
     console.warn('Failed to load events for sidebar:', err);
+  } finally {
+    isPopulatingSidebarEvents = false;
   }
 }
 
 async function updateSidebarEvent(eventName, eventPrefix) {
-  await populateSidebarEvents();
-  if (eventCreated && eventName && eventPrefix) {
-    sidebarEventSelect.value = eventPrefix.toUpperCase();
-  } else {
-    sidebarEventSelect.value = '';
+  if (eventName !== undefined && eventPrefix !== undefined) {
+    try {
+      await window.api.saveEventConfig({ eventName, eventPrefix });
+    } catch (_) {}
   }
-  updateSidebarSelectState();
+  await populateSidebarEvents();
 }
 
 // Handle change directly on sidebar dropdown selection
@@ -818,15 +855,20 @@ async function openSelectEventModal() {
   
   // Populate existing events dropdown from MongoDB
   try {
+    const events = await window.api.getAllEvents();
     eventSelectDropdown.innerHTML = '<option value="">-- Choose an Event --</option>';
     
-    const events = await window.api.getAllEvents();
     if (events && events.length > 0) {
+      const seen = new Set();
       for (const ev of events) {
+        if (!ev || !ev.eventPrefix) continue;
+        const prefixUpper = ev.eventPrefix.toUpperCase();
+        if (seen.has(prefixUpper)) continue;
+        seen.add(prefixUpper);
+
         const opt = document.createElement('option');
-        opt.value = ev.eventPrefix;
-        opt.textContent = `${ev.eventName} (${ev.eventPrefix})`;
-        // Store name as data attribute
+        opt.value = prefixUpper;
+        opt.textContent = `${ev.eventName} (${prefixUpper})`;
         opt.setAttribute('data-name', ev.eventName);
         eventSelectDropdown.appendChild(opt);
       }
@@ -1047,18 +1089,11 @@ btnToggleLog.addEventListener('click', () => {
     console.warn('Failed to get initial active frame:', err);
   }
 
-  // Load Event Config on startup
+  // Load Event Config and populate sidebar on startup
   try {
-    const eventConfig = await window.api.getEventConfig();
-    if (eventConfig && eventConfig.eventName && eventConfig.eventPrefix) {
-      eventCreated = true;
-      await updateSidebarEvent(eventConfig.eventName, eventConfig.eventPrefix);
-    } else {
-      await populateSidebarEvents();
-    }
+    await populateSidebarEvents();
   } catch (err) {
     console.warn('Failed to load event config:', err);
-    await populateSidebarEvents();
   }
 
   // Update empty state on startup
