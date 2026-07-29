@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('api', {
   // Manual send / Delete operations
   manualSend:    (data)       => ipcRenderer.invoke('manual-send', data),
   deleteImage:   (imageId)    => ipcRenderer.invoke('delete-image', imageId),
+  toggleHideImage: (imageId, hide) => ipcRenderer.invoke('toggle-hide-image', imageId, hide),
 
   // Event Config
   getEventConfig:  ()           => ipcRenderer.invoke('get-event-config'),

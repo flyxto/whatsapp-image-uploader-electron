@@ -215,6 +215,13 @@ function upsertCard(imageId, status, extra = {}) {
           </span>
         </div>
       </div>
+      <button class="card-hide-btn ${extra.hide ? 'is-hidden' : ''}" title="${extra.hide ? 'Unhide Photo' : 'Hide Photo'}" id="hide-${imageId}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          ${extra.hide ? 
+            '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line>' : 
+            '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle>'}
+        </svg>
+      </button>
       <button class="card-delete-btn" title="Delete Photo" id="del-${imageId}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="3 6 5 6 21 6"></polyline>
@@ -332,6 +339,35 @@ function upsertCard(imageId, status, extra = {}) {
     };
   }
 
+  // Bind hide button click
+  const hideBtn = card.querySelector('.card-hide-btn');
+  if (hideBtn) {
+    hideBtn.onclick = async (e) => {
+      e.stopPropagation();
+      const isCurrentlyHidden = hideBtn.classList.contains('is-hidden');
+      const newState = !isCurrentlyHidden;
+      
+      try {
+        const result = await window.api.toggleHideImage(imageId, newState);
+        if (result.success) {
+          if (newState) {
+            hideBtn.classList.add('is-hidden');
+            hideBtn.title = 'Unhide Photo';
+            hideBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>';
+          } else {
+            hideBtn.classList.remove('is-hidden');
+            hideBtn.title = 'Hide Photo';
+            hideBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
+          }
+        } else {
+          alert(`Failed to hide/unhide image: ${result.error || 'Unknown error'}`);
+        }
+      } catch (err) {
+        alert(`Error hiding/unhiding image: ${err.message}`);
+      }
+    };
+  }
+
   // Re-apply current tab filter (in case a card's status changed and needs to be hidden)
   applySearch();
 }
@@ -405,8 +441,8 @@ window.api.onDbStatus(({ connected, error }) => {
   if (connected) refreshStats();
 });
 
-window.api.onImageStatus(({ imageId, status, user, imageUrl, error, previewUrl, filePath, phone }) => {
-  upsertCard(imageId, status, { user, imageUrl, error, previewUrl, filePath, phone });
+window.api.onImageStatus(({ imageId, status, user, imageUrl, error, previewUrl, filePath, phone, hide }) => {
+  upsertCard(imageId, status, { user, imageUrl, error, previewUrl, filePath, phone, hide });
   refreshStats();
 });
 

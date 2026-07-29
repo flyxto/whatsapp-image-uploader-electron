@@ -846,7 +846,8 @@ body { display: flex; }
   z-index: 6;
 }
 
-.queue-card:hover .card-delete-btn {
+.queue-card:hover .card-delete-btn,
+.queue-card:hover .card-hide-btn {
   opacity: 1;
   transform: translateY(0);
 }
@@ -861,6 +862,46 @@ body { display: flex; }
   width: 12px;
   height: 12px;
 }
+
+/* Card Hover Hide Button */
+.card-hide-btn {
+  position: absolute;
+  bottom: 8px;
+  right: 40px; /* offset from delete btn */
+  background-color: rgba(75, 85, 99, 0.95); /* slate-600 */
+  color: white;
+  border: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  transform: translateY(5px);
+  transition: all 0.2s ease;
+  z-index: 6;
+}
+
+.card-hide-btn:hover {
+  transform: scale(1.1);
+  background-color: #374151;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.5);
+}
+
+.card-hide-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.card-hide-btn.is-hidden {
+  background-color: #ef4444; /* red when hidden */
+  opacity: 1; /* Always show if it's hidden */
+  transform: translateY(0);
+}
+
 
 /* Delete Button & Warning Text */
 .btn-danger {

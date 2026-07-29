@@ -378,6 +378,7 @@ async function processImage(filePath) {
             status:   doc.status,
             imageUrl: doc.imageUrl || undefined,
             phone:    doc.phone    || undefined,
+            hide:     doc.hide     || false,
             filePath,
           });
         }
@@ -435,6 +436,7 @@ async function processImage(filePath) {
           status:   doc.status,
           imageUrl: doc.imageUrl || undefined,
           phone:    doc.phone    || undefined,
+          hide:     doc.hide     || false,
           filePath,
         });
       }
@@ -446,7 +448,7 @@ async function processImage(filePath) {
     let imageUrl = doc?.imageUrl;
     if (!imageUrl) {
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('image-status', { imageId, status: 'processing', user: doc ? { name: doc.name, phone: doc.phone } : undefined });
+        mainWindow.webContents.send('image-status', { imageId, status: 'processing', user: doc ? { name: doc.name, phone: doc.phone } : undefined, hide: doc?.hide });
       }
       
       const tempFile = await applyActiveFrame(filePath, imageId);
@@ -476,7 +478,7 @@ async function processImage(filePath) {
       );
       
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('image-status', { imageId, status: 'uploaded', imageUrl, user: doc ? { name: doc.name, phone: doc.phone } : undefined });
+        mainWindow.webContents.send('image-status', { imageId, status: 'uploaded', imageUrl, user: doc ? { name: doc.name, phone: doc.phone } : undefined, hide: doc?.hide });
       }
     }
 
@@ -485,7 +487,7 @@ async function processImage(filePath) {
       log('warn', `⏳ No phone number yet for imageId "${imageId}" — queuing for retry`, imageId);
       waitingFiles.set(imageId, filePath);
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('image-status', { imageId, status: 'no-match', imageUrl, user: doc ? { name: doc.name, phone: doc.phone } : undefined });
+        mainWindow.webContents.send('image-status', { imageId, status: 'no-match', imageUrl, user: doc ? { name: doc.name, phone: doc.phone } : undefined, hide: doc?.hide });
       }
       processingSet.delete(imageId);
       return;
@@ -505,7 +507,7 @@ async function processImage(filePath) {
     waitingFiles.delete(imageId);
 
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('image-status', { imageId, status: 'completed', imageUrl, user: doc ? { name: doc.name, phone: doc.phone } : undefined });
+      mainWindow.webContents.send('image-status', { imageId, status: 'completed', imageUrl, user: doc ? { name: doc.name, phone: doc.phone } : undefined, hide: doc?.hide });
     }
 
     log('info', `🎉 Done! ${imageId} → ${imageUrl}`, imageId);
@@ -572,6 +574,7 @@ async function getInitialImages(folderPath) {
         previewUrl,
         imageUrl: doc?.imageUrl,
         user: doc ? { name: doc.name, phone: doc.phone } : undefined,
+        hide: doc?.hide,
         mtime: stats.birthtimeMs || stats.mtimeMs
       });
     }
@@ -838,6 +841,21 @@ ipcMain.handle('delete-image', async (_, imageId) => {
   } catch (err) {
     const msg = err.message || String(err);
     log('error', `❌ Failed to delete image ${imageId}: ${msg}`, imageId);
+    return { success: false, error: msg };
+  }
+});
+
+ipcMain.handle('toggle-hide-image', async (_, imageId, hide) => {
+  try {
+    if (usersCollection && dbConnected) {
+      await usersCollection.updateOne({ imageId }, { $set: { hide: hide } });
+      log('info', `👁️ Image ${imageId} hide status set to ${hide}`, imageId);
+      return { success: true };
+    }
+    return { success: false, error: 'Database not connected' };
+  } catch (err) {
+    const msg = err.message || String(err);
+    log('error', `❌ Failed to hide image ${imageId}: ${msg}`, imageId);
     return { success: false, error: msg };
   }
 });
