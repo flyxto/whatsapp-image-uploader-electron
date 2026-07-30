@@ -38,6 +38,7 @@
       ".env"
     ],
     "win": {
+      "guid": "com.whatsappbooth.app",
       "target": [
         {
           "target": "portable",

@@ -1,6 +1,7 @@
 'use strict';
 
 const { app, BrowserWindow, ipcMain, dialog, nativeImage, shell } = require('electron');
+app.setName('whatsapp-booth');
 const path = require('node:path');
 const fs = require('node:fs');
 const dns = require('node:dns');
