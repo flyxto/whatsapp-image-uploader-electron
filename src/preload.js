@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('api', {
   getDbStatus:   ()           => ipcRenderer.invoke('get-db-status'),
   getStats:      ()           => ipcRenderer.invoke('get-stats'),
   retryFailed:   ()           => ipcRenderer.invoke('retry-failed'),
+  generateQrCode:(text)       => ipcRenderer.invoke('generate-qr-code', text),
 
   // Frames
   uploadFrame:   ()           => ipcRenderer.invoke('upload-frame'),

@@ -168,6 +168,10 @@
             <img id="modal-preview-img" class="modal-preview-img" src="" alt="Preview" />
           </div>
           <div class="modal-photo-id">Photo ID: <strong id="modal-photo-id-text">—</strong></div>
+          <div class="modal-photo-url" id="modal-photo-url-wrap" style="display:none">
+            <span class="modal-url-label">Cloudflare URL:</span>
+            <a id="modal-photo-url-link" class="modal-url-link" href="#" target="_blank" rel="noopener noreferrer"></a>
+          </div>
           <label class="modal-label" for="modal-phone">WhatsApp Number</label>
           <div class="modal-input-wrap">
             <input
@@ -181,8 +185,30 @@
           <div class="modal-error" id="modal-error" style="display:none"></div>
         </div>
         <div class="modal-footer">
+          <button class="btn btn-secondary btn-qr" id="modal-qr-btn" style="display:none">📱 Show QR Code</button>
+          <div style="flex:1"></div>
           <button class="btn btn-secondary" id="modal-cancel">Cancel</button>
           <button class="btn btn-primary" id="modal-send">Upload &amp; Send</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── QR Code Modal ──────────────────────────────────────────────── -->
+    <div class="modal-overlay" id="qr-modal" style="display:none">
+      <div class="modal-box qr-modal-box">
+        <div class="modal-header">
+          <h2 class="modal-title">Photo QR Code</h2>
+          <button class="modal-close" id="qr-modal-close">✕</button>
+        </div>
+        <div class="modal-body qr-modal-body">
+          <div class="qr-code-wrap">
+            <img id="qr-code-img" src="" alt="QR Code" />
+          </div>
+          <p class="qr-instructions">Scan with your phone camera to open the photo link</p>
+          <div class="qr-photo-id">Photo ID: <strong id="qr-photo-id-text">—</strong></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="qr-modal-done">Close</button>
         </div>
       </div>
     </div>

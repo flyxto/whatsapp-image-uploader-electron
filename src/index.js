@@ -21,6 +21,7 @@ const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const sharp = require('sharp');
 sharp.cache(false);
+const QRCode = require('qrcode');
 
 // ── Cloudflare R2 client ──────────────────────────────────────────────────────
 const s3 = new S3Client({
@@ -960,6 +961,15 @@ ipcMain.handle('delete-frame', (_, filename) => {
     saveConfig({ activeFrame: null });
   }
   return { success: true };
+});
+
+ipcMain.handle('generate-qr-code', async (_, text) => {
+  try {
+    const dataUrl = await QRCode.toDataURL(text, { width: 320, margin: 2 });
+    return { ok: true, dataUrl };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 });
 
 // ── Manual send (no registered user) ─────────────────────────────────────────

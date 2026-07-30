@@ -7,6 +7,7 @@ let activeFrame     = null;
 const imageCards    = new Map(); // imageId → card element
 const cardFilePaths = new Map(); // imageId → filePath (for manual send)
 const cardPhones    = new Map(); // imageId → phone number (for search)
+const cardImageUrls = new Map(); // imageId → Cloudflare URL
 let queueCount      = 0;
 let currentTab      = 'all';     // 'all' | 'sent' | 'not-sent'
 let eventCreated    = false;
@@ -283,6 +284,7 @@ function upsertCard(imageId, status, extra = {}) {
 
   // Show image URL if completed
   if (extra.imageUrl) {
+    cardImageUrls.set(imageId, extra.imageUrl);
     const urlEl = document.getElementById(`curl-${imageId}`);
     if (urlEl) urlEl.textContent = extra.imageUrl;
   }
@@ -455,6 +457,9 @@ const manualModal    = document.getElementById('manual-modal');
 const modalPhoneInput = document.getElementById('modal-phone');
 const modalPreviewImg = document.getElementById('modal-preview-img');
 const modalPhotoIdTxt = document.getElementById('modal-photo-id-text');
+const modalPhotoUrlWrap = document.getElementById('modal-photo-url-wrap');
+const modalPhotoUrlLink = document.getElementById('modal-photo-url-link');
+const modalQrBtn     = document.getElementById('modal-qr-btn');
 const modalError      = document.getElementById('modal-error');
 const modalSendBtn    = document.getElementById('modal-send');
 
@@ -464,6 +469,17 @@ function openManualModal(imageId) {
   activeManualImageId = imageId;
   modalPhotoIdTxt.textContent = formatUserCode(imageId);
   modalPhoneInput.value = '';
+
+  const imageUrl = cardImageUrls.get(imageId);
+  if (imageUrl) {
+    modalPhotoUrlLink.href = imageUrl;
+    modalPhotoUrlLink.textContent = imageUrl;
+    modalPhotoUrlWrap.style.display = 'flex';
+    modalQrBtn.style.display = 'inline-flex';
+  } else {
+    modalPhotoUrlWrap.style.display = 'none';
+    modalQrBtn.style.display = 'none';
+  }
 
   // Show the complete image with better quality (local file:// URL)
   const filePath = cardFilePaths.get(imageId);
@@ -498,6 +514,38 @@ function closeManualModal() {
   manualModal.style.display = 'none';
   activeManualImageId = null;
 }
+
+// ── QR Code Modal ─────────────────────────────────────────────────────────────
+const qrModal       = document.getElementById('qr-modal');
+const qrCodeImg     = document.getElementById('qr-code-img');
+const qrPhotoIdTxt  = document.getElementById('qr-photo-id-text');
+const qrModalClose  = document.getElementById('qr-modal-close');
+const qrModalDone   = document.getElementById('qr-modal-done');
+
+modalQrBtn.addEventListener('click', async () => {
+  if (!activeManualImageId) return;
+  const imageUrl = cardImageUrls.get(activeManualImageId);
+  if (!imageUrl) return;
+
+  qrPhotoIdTxt.textContent = formatUserCode(activeManualImageId);
+  qrCodeImg.src = '';
+
+  const res = await window.api.generateQrCode(imageUrl);
+  if (res.ok) {
+    qrCodeImg.src = res.dataUrl;
+    qrModal.style.display = 'flex';
+  } else {
+    alert(`Failed to generate QR code: ${res.error}`);
+  }
+});
+
+function closeQrModal() {
+  qrModal.style.display = 'none';
+}
+
+qrModalClose.addEventListener('click', closeQrModal);
+qrModalDone.addEventListener('click', closeQrModal);
+qrModal.addEventListener('click', (e) => { if (e.target === qrModal) closeQrModal(); });
 
 document.getElementById('modal-close').addEventListener('click', closeManualModal);
 document.getElementById('modal-cancel').addEventListener('click', closeManualModal);
