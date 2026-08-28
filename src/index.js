@@ -237,18 +237,18 @@ async function sendWhatsApp(phone, imageUrl, userName) {
     const response = await axios.post(
       `https://graph.facebook.com/v25.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`,
       {
-        messaging_product: 'whatsapp',
+        messaging_product: "whatsapp",
         to: normalised,
-        type: 'template',
+        type: "template",
         template: {
-          name: 'photo_booth_test',
-          language: { code: 'en' },
+          name: "pop_culture",
+          language: { code: "en" },
           components: [
             {
-              type: 'header',
+              type: "header",
               parameters: [
                 {
-                  type: 'image',
+                  type: "image",
                   image: { link: imageUrl },
                 },
               ],
@@ -259,10 +259,10 @@ async function sendWhatsApp(phone, imageUrl, userName) {
       {
         headers: {
           Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`,
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         timeout: 15000,
-      }
+      },
     );
 
     log('info', `✅ WhatsApp sent to ${normalised} — message id: ${response.data?.messages?.[0]?.id ?? 'n/a'}`);
