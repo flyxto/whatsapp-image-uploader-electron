@@ -298,9 +298,12 @@ async function applyActiveFrame(filePath, imageId) {
 
     const meta = frameCache[cfg.activeFrame];
 
-    // 2. Resize photo to full frame size (matches height, crops width)
-    await sharp(filePath)
-      .rotate() // Auto-orient based on EXIF
+    // 2. Auto-orient based on EXIF, then rotate 180° for upside-down booth effect
+    const orientedBuffer = await sharp(filePath).rotate().toBuffer();
+
+    // 3. Resize photo to full frame size (matches height, crops width) and overlay frame
+    await sharp(orientedBuffer)
+      .rotate(180)
       .resize(meta.width, meta.height, { fit: 'cover' })
       .composite([{ input: framePath }])
       .jpeg({ quality: 100 })
@@ -402,8 +405,9 @@ async function processImage(filePath) {
   // Generate a small thumbnail for the dashboard preview
   let previewUrl = null;
   try {
-    const thumbBuffer = await sharp(filePath)
-      .rotate()
+    const oriented = await sharp(filePath).rotate().toBuffer();
+    const thumbBuffer = await sharp(oriented)
+      .rotate(180)
       .resize(140)
       .jpeg({ quality: 80 })
       .toBuffer();
@@ -446,9 +450,9 @@ async function processImage(filePath) {
       return;
     }
 
-    // 1. Upload if we don't have an imageUrl yet
-    let imageUrl = doc?.imageUrl;
-    if (!imageUrl) {
+    // 1. Always apply frame (with 180° rotation) and upload to Cloudflare
+    let imageUrl;
+    {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('image-status', { imageId, status: 'processing', user: doc ? { name: doc.name, phone: doc.phone } : undefined, hide: doc?.hide });
       }
@@ -554,8 +558,9 @@ async function getInitialImages(folderPath) {
 
       let previewUrl = null;
       try {
-        const thumbBuffer = await sharp(filePath)
-          .rotate()
+        const oriented = await sharp(filePath).rotate().toBuffer();
+        const thumbBuffer = await sharp(oriented)
+          .rotate(180)
           .resize(140)
           .jpeg({ quality: 80 })
           .toBuffer();
