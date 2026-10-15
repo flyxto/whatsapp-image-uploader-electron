@@ -20,6 +20,7 @@ const btnStop         = document.getElementById('btn-stop');
 const btnToggleLog    = document.getElementById('btn-toggle-log');
 const btnRetry        = document.getElementById('btn-retry');
 const btnRotateToggle = document.getElementById('btn-rotate-toggle');
+const templateInput   = document.getElementById('whatsapp-template-input');
 const rotateStatusText = document.getElementById('rotate-status-text');
 const btnClearLog     = document.getElementById('btn-clear-log');
 const contentArea     = document.getElementById('content-area');
@@ -40,6 +41,18 @@ function setRotateToggleUi(enabled) {
   btnRotateToggle.setAttribute('aria-checked', enabled ? 'true' : 'false');
   rotateStatusText.textContent = enabled ? 'On' : 'Off';
 }
+
+templateInput.addEventListener('change', async () => {
+  try {
+    const { whatsappTemplate } = await window.api.setWhatsappTemplate(templateInput.value);
+    templateInput.value = whatsappTemplate;
+  } catch (err) {
+    appendLog({ level: 'error', message: `Failed to update WhatsApp template: ${err.message}`, ts: new Date().toISOString() });
+  }
+});
+templateInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') templateInput.blur();
+});
 
 btnRotateToggle.addEventListener('click', async () => {
   const next = !btnRotateToggle.classList.contains('is-on');
@@ -1153,8 +1166,9 @@ btnToggleLog.addEventListener('click', () => {
 
   try {
     setRotateToggleUi(await window.api.getRotateSetting());
+    templateInput.value = await window.api.getWhatsappTemplate();
   } catch (err) {
-    console.warn('Failed to load rotate setting:', err);
+    console.warn('Failed to load settings:', err);
   }
 
   // Get active frame status on start

@@ -14,6 +14,10 @@ contextBridge.exposeInMainWorld('api', {
   deleteImage:   (imageId)    => ipcRenderer.invoke('delete-image', imageId),
   toggleHideImage: (imageId, hide) => ipcRenderer.invoke('toggle-hide-image', imageId, hide),
 
+  // WhatsApp template
+  getWhatsappTemplate: ()       => ipcRenderer.invoke('get-whatsapp-template'),
+  setWhatsappTemplate: (name)   => ipcRenderer.invoke('set-whatsapp-template', name),
+
   // Image rotate
   getRotateSetting: ()          => ipcRenderer.invoke('get-rotate-setting'),
   setRotateSetting: (enabled)   => ipcRenderer.invoke('set-rotate-setting', enabled),

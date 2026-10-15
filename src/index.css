@@ -269,8 +269,25 @@ body { display: flex; }
   flex-shrink: 0;
 }
 .settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   padding: 16px;
   overflow-y: auto;
+}
+.settings-input {
+  width: 180px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: var(--font);
+  padding: 6px 10px;
+  outline: none;
+}
+.settings-input:focus {
+  border-color: var(--accent);
 }
 .settings-row {
   display: flex;

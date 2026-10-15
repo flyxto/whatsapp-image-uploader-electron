@@ -82,6 +82,13 @@ function isRotate180Enabled(cfg = loadConfig()) {
   return cfg.rotate180 !== false;
 }
 
+const DEFAULT_WHATSAPP_TEMPLATE = 'pop_culture';
+
+function getWhatsAppTemplateName(cfg = loadConfig()) {
+  const name = String(cfg.whatsappTemplate || '').trim().toLowerCase();
+  return /^[a-z0-9_]+$/.test(name) ? name : DEFAULT_WHATSAPP_TEMPLATE;
+}
+
 /** EXIF auto-orient, then optional 180° rotate. */
 async function preparePhoto(filePath) {
   const oriented = await sharp(filePath).rotate().toBuffer();
@@ -253,7 +260,7 @@ async function sendWhatsApp(phone, imageUrl, userName) {
         to: normalised,
         type: "template",
         template: {
-          name: "pop_culture",
+          name: getWhatsAppTemplateName(),
           language: { code: "en" },
           components: [
             {
@@ -745,6 +752,17 @@ ipcMain.handle('start-watch', async (_, folderPath) => {
 ipcMain.handle('get-saved-folder', () => {
   const cfg = loadConfig();
   return cfg.lastFolder || null;
+});
+
+ipcMain.handle('get-whatsapp-template', () => getWhatsAppTemplateName());
+
+ipcMain.handle('set-whatsapp-template', (_, name) => {
+  const cleaned = String(name || '').trim().toLowerCase();
+  const valid = /^[a-z0-9_]+$/.test(cleaned);
+  const whatsappTemplate = valid ? cleaned : getWhatsAppTemplateName();
+  if (valid) saveConfig({ whatsappTemplate });
+  log('info', `💬 WhatsApp template set to ${whatsappTemplate}`);
+  return { whatsappTemplate };
 });
 
 ipcMain.handle('get-rotate-setting', () => isRotate180Enabled());
