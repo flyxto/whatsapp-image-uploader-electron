@@ -19,6 +19,8 @@ const btnWatch        = document.getElementById('btn-watch');
 const btnStop         = document.getElementById('btn-stop');
 const btnToggleLog    = document.getElementById('btn-toggle-log');
 const btnRetry        = document.getElementById('btn-retry');
+const btnRotateToggle = document.getElementById('btn-rotate-toggle');
+const rotateStatusText = document.getElementById('rotate-status-text');
 const btnClearLog     = document.getElementById('btn-clear-log');
 const contentArea     = document.getElementById('content-area');
 const queueList       = document.getElementById('queue-list');
@@ -32,6 +34,26 @@ const statCompleted   = document.getElementById('stat-completed');
 const statFailed      = document.getElementById('stat-failed');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+function setRotateToggleUi(enabled) {
+  btnRotateToggle.classList.toggle('is-on', enabled);
+  btnRotateToggle.setAttribute('aria-checked', enabled ? 'true' : 'false');
+  rotateStatusText.textContent = enabled ? 'On' : 'Off';
+}
+
+btnRotateToggle.addEventListener('click', async () => {
+  const next = !btnRotateToggle.classList.contains('is-on');
+  btnRotateToggle.disabled = true;
+  try {
+    const { rotate180 } = await window.api.setRotateSetting(next);
+    setRotateToggleUi(rotate180);
+    if (selectedFolder) await loadImagesList(selectedFolder);
+  } catch (err) {
+    appendLog({ level: 'error', message: `Failed to update rotate setting: ${err.message}`, ts: new Date().toISOString() });
+  } finally {
+    btnRotateToggle.disabled = false;
+  }
+});
 
 function updateWatchButtonState() {
   btnWatch.disabled = !(selectedFolder && eventCreated);
@@ -1129,6 +1151,12 @@ btnToggleLog.addEventListener('click', () => {
     refreshStats();
   }
 
+  try {
+    setRotateToggleUi(await window.api.getRotateSetting());
+  } catch (err) {
+    console.warn('Failed to load rotate setting:', err);
+  }
+
   // Get active frame status on start
   try {
     const { activeFrame: initialActiveFrame } = await window.api.getFrames();
@@ -1178,27 +1206,28 @@ btnToggleLog.addEventListener('click', () => {
 
 const navQueue = document.getElementById('nav-queue');
 const navFrames = document.getElementById('nav-frames');
+const navSettings = document.getElementById('nav-settings');
 const panelQueue = document.getElementById('panel-queue');
 const panelFrames = document.getElementById('panel-frames');
+const panelSettings = document.getElementById('panel-settings');
 const btnUploadFrame = document.getElementById('btn-upload-frame');
 const framesList = document.getElementById('frames-list');
 
-if (navQueue && navFrames) {
-  navQueue.addEventListener('click', () => {
-    navQueue.classList.add('active');
-    navFrames.classList.remove('active');
-    panelQueue.style.display = 'flex';
-    panelFrames.style.display = 'none';
-  });
-
-  navFrames.addEventListener('click', () => {
-    navFrames.classList.add('active');
-    navQueue.classList.remove('active');
-    panelFrames.style.display = 'flex';
-    panelQueue.style.display = 'none';
-    loadFrames();
-  });
+function showPanel(name) {
+  const panels = { queue: panelQueue, frames: panelFrames, settings: panelSettings };
+  const navs = { queue: navQueue, frames: navFrames, settings: navSettings };
+  for (const [key, el] of Object.entries(panels)) {
+    if (el) el.style.display = key === name ? 'flex' : 'none';
+  }
+  for (const [key, el] of Object.entries(navs)) {
+    if (el) el.classList.toggle('active', key === name);
+  }
+  if (name === 'frames') loadFrames();
 }
+
+if (navQueue) navQueue.addEventListener('click', () => showPanel('queue'));
+if (navFrames) navFrames.addEventListener('click', () => showPanel('frames'));
+if (navSettings) navSettings.addEventListener('click', () => showPanel('settings'));
 
 if (btnUploadFrame) {
   btnUploadFrame.addEventListener('click', async () => {

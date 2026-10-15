@@ -77,6 +77,18 @@ function saveConfig(updates) {
   fs.writeFileSync(getConfigPath(), JSON.stringify(next, null, 2), 'utf8');
 }
 
+/** Upside-down booth rotate. On unless explicitly turned off. */
+function isRotate180Enabled(cfg = loadConfig()) {
+  return cfg.rotate180 !== false;
+}
+
+/** EXIF auto-orient, then optional 180° rotate. */
+async function preparePhoto(filePath) {
+  const oriented = await sharp(filePath).rotate().toBuffer();
+  if (!isRotate180Enabled()) return oriented;
+  return sharp(oriented).rotate(180).toBuffer();
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /** Send a log entry to the renderer */
@@ -298,12 +310,11 @@ async function applyActiveFrame(filePath, imageId) {
 
     const meta = frameCache[cfg.activeFrame];
 
-    // 2. Auto-orient based on EXIF, then rotate 180° for upside-down booth effect
-    const orientedBuffer = await sharp(filePath).rotate().toBuffer();
+    // 2. Auto-orient based on EXIF, then optional 180° for upside-down booth effect
+    const orientedBuffer = await preparePhoto(filePath);
 
     // 3. Resize photo to full frame size (matches height, crops width) and overlay frame
     await sharp(orientedBuffer)
-      .rotate(180)
       .resize(meta.width, meta.height, { fit: 'cover' })
       .composite([{ input: framePath }])
       .jpeg({ quality: 100 })
@@ -405,9 +416,8 @@ async function processImage(filePath) {
   // Generate a small thumbnail for the dashboard preview
   let previewUrl = null;
   try {
-    const oriented = await sharp(filePath).rotate().toBuffer();
+    const oriented = await preparePhoto(filePath);
     const thumbBuffer = await sharp(oriented)
-      .rotate(180)
       .resize(140)
       .jpeg({ quality: 80 })
       .toBuffer();
@@ -558,9 +568,8 @@ async function getInitialImages(folderPath) {
 
       let previewUrl = null;
       try {
-        const oriented = await sharp(filePath).rotate().toBuffer();
+        const oriented = await preparePhoto(filePath);
         const thumbBuffer = await sharp(oriented)
-          .rotate(180)
           .resize(140)
           .jpeg({ quality: 80 })
           .toBuffer();
@@ -736,6 +745,15 @@ ipcMain.handle('start-watch', async (_, folderPath) => {
 ipcMain.handle('get-saved-folder', () => {
   const cfg = loadConfig();
   return cfg.lastFolder || null;
+});
+
+ipcMain.handle('get-rotate-setting', () => isRotate180Enabled());
+
+ipcMain.handle('set-rotate-setting', (_, enabled) => {
+  const rotate180 = !!enabled;
+  saveConfig({ rotate180 });
+  log('info', rotate180 ? '🔄 180° rotate enabled' : '🔄 180° rotate disabled');
+  return { rotate180 };
 });
 
 ipcMain.handle('get-event-config', () => {

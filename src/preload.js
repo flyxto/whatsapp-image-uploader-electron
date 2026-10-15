@@ -14,6 +14,10 @@ contextBridge.exposeInMainWorld('api', {
   deleteImage:   (imageId)    => ipcRenderer.invoke('delete-image', imageId),
   toggleHideImage: (imageId, hide) => ipcRenderer.invoke('toggle-hide-image', imageId, hide),
 
+  // Image rotate
+  getRotateSetting: ()          => ipcRenderer.invoke('get-rotate-setting'),
+  setRotateSetting: (enabled)   => ipcRenderer.invoke('set-rotate-setting', enabled),
+
   // Event Config
   getEventConfig:  ()           => ipcRenderer.invoke('get-event-config'),
   saveEventConfig: (data)       => ipcRenderer.invoke('save-event-config', data),

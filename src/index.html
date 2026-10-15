@@ -74,6 +74,7 @@
       <nav class="sidebar-nav">
         <button class="btn btn-ghost active" id="nav-queue">📸 Photo Queue</button>
         <button class="btn btn-ghost" id="nav-frames">🖼️ Frames</button>
+        <button class="btn btn-ghost" id="nav-settings">⚙️ Settings</button>
       </nav>
     </aside>
 
@@ -141,6 +142,25 @@
           </div>
           <div class="frames-list" id="frames-list">
             <!-- Frames will be rendered here -->
+          </div>
+        </section>
+
+        <!-- Settings Panel -->
+        <section class="panel panel-settings" id="panel-settings" style="display: none;">
+          <div class="panel-header">
+            <h2>Settings</h2>
+          </div>
+          <div class="settings-list">
+            <div class="settings-row">
+              <div>
+                <div class="settings-title">Rotate 180°</div>
+                <div class="settings-desc">Turn photos upside down for an inverted booth camera.</div>
+              </div>
+              <div class="settings-control">
+                <span class="status-value" id="rotate-status-text">On</span>
+                <button type="button" class="toggle-switch is-on" id="btn-rotate-toggle" role="switch" aria-checked="true" aria-label="Rotate photos 180 degrees"></button>
+              </div>
+            </div>
           </div>
         </section>
 
