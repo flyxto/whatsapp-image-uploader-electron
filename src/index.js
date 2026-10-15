@@ -998,51 +998,35 @@ ipcMain.handle('generate-qr-code', async (_, text) => {
 
 // ── Manual send (no registered user) ─────────────────────────────────────────
 
-ipcMain.handle('manual-send', async (_, { filePath, phone, imageId }) => {
+ipcMain.handle('manual-send', async (_, { phone, imageId }) => {
   try {
     log('info', `📤 Manual send requested for ${imageId} → ${phone}`, imageId);
 
-    if (!fs.existsSync(filePath)) {
-      throw new Error(`File not found: ${filePath}`);
+    if (!usersCollection || !dbConnected) {
+      throw new Error('MongoDB unavailable — cannot send without the stored image URL');
     }
 
-    const tempFile = await applyActiveFrame(filePath, imageId);
-    if (!tempFile) {
-      throw new Error('No active frame selected or failed to apply the frame template.');
-    }
-    const uploadPath = tempFile;
-
-    // Upload to Cloudflare R2
-    const imageUrl = await uploadToCloudflare(uploadPath, `manual_${imageId}`);
-    if (tempFile && fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
-
-    if (mainWindow) {
-      mainWindow.webContents.send('image-status', { imageId, status: 'uploaded', imageUrl });
+    const existing = await usersCollection.findOne({ imageId });
+    const imageUrl = existing?.imageUrl;
+    if (!imageUrl) {
+      throw new Error('No image URL stored for this photo yet');
     }
 
-    // Send WhatsApp
+    // Send WhatsApp with the URL already saved from the first upload
     await sendWhatsApp(phone, imageUrl, null);
 
-    // Save / update MongoDB record so the send is tracked
-    if (usersCollection && dbConnected) {
-      await usersCollection.findOneAndUpdate(
-        { imageId },
-        {
-          $set: {
-            phone,
-            imageUrl,
-            status:      'completed',
-            completedAt: new Date(),
-            code:        getCodeFromImageId(imageId),
-          },
-          $setOnInsert: { imageId, createdAt: new Date() },
+    await usersCollection.updateOne(
+      { imageId },
+      {
+        $set: {
+          phone,
+          status:      'completed',
+          completedAt: new Date(),
+          code:        getCodeFromImageId(imageId),
         },
-        { upsert: true, returnDocument: 'after' }
-      );
-      log('info', `💾 Saved manual send record for ${imageId}`, imageId);
-    } else {
-      log('warn', `⚠️  MongoDB unavailable — record not saved for ${imageId}`, imageId);
-    }
+      }
+    );
+    log('info', `💾 Saved manual send record for ${imageId}`, imageId);
 
     // Remove from retry queue so the loop stops re-checking this file
     waitingFiles.delete(imageId);
