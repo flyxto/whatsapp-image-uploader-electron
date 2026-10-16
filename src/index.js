@@ -447,8 +447,8 @@ async function processImage(filePath) {
   if (dbConnected) {
     try {
       const doc = await db.findOne(imageId);
-      if (doc && doc.status === 'completed') {
-        log('info', `⏭️  imageId "${imageId}" already completed — skipping lookup`, imageId);
+      if (doc && (doc.status === 'completed' || doc.status === 'generated')) {
+        log('info', `⏭️  imageId "${imageId}" already ${doc.status} — skipping lookup`, imageId);
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('image-status', {
             imageId,
@@ -504,8 +504,8 @@ async function processImage(filePath) {
       }
     }
 
-    if (doc && doc.status === 'completed') {
-      log('info', `⏭️  imageId "${imageId}" already completed — skipping`, imageId);
+    if (doc && (doc.status === 'completed' || doc.status === 'generated')) {
+      log('info', `⏭️  imageId "${imageId}" already ${doc.status} — skipping`, imageId);
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('image-status', {
           imageId,
@@ -716,8 +716,8 @@ async function startWatcher(folderPath) {
           enqueueImage(filePath);
         }
 
-        // If file isn't completed, add to retry queue
-        if (!doc || doc.status !== 'completed') {
+        // If file isn't completed or delivered via QR, add to retry queue
+        if (!doc || (doc.status !== 'completed' && doc.status !== 'generated')) {
           waitingFiles.set(imageId, filePath);
         }
       }

@@ -105,6 +105,7 @@ function statusLabel(status) {
     processing: 'Uploading photo to Cloudflare R2…',
     uploaded:   'Uploaded — sending WhatsApp…',
     completed:  'Done! Photo delivered via WhatsApp.',
+    generated:  'Done! Photo delivered via QR Code.',
     failed:     'Processing failed.',
     'no-match': 'No matching user found in database.',
   };
@@ -232,7 +233,17 @@ function upsertCard(imageId, status, extra = {}) {
     card = document.createElement('div');
     card.className = `queue-card ${status}`;
 
-    const dbSaved = ['uploaded', 'no-match', 'completed'].includes(status);
+    const dbSaved = ['uploaded', 'no-match', 'completed', 'generated'].includes(status);
+
+    let sentPillClass = 'pill-not-sent';
+    let sentPillText = 'Not Sent';
+    if (status === 'completed') {
+      sentPillClass = 'pill-sent';
+      sentPillText = 'Sent';
+    } else if (status === 'generated') {
+      sentPillClass = 'pill-qr-sent';
+      sentPillText = 'QR Sent';
+    }
 
     card.innerHTML = `
       <div class="card-preview" id="cp-${imageId}">
@@ -243,8 +254,8 @@ function upsertCard(imageId, status, extra = {}) {
         <div class="card-user" id="cu-${imageId}"></div>
         <div class="card-step" id="cs-${imageId}">${statusLabel(status)}</div>
         <div class="card-status-pill-wrap">
-          <span class="status-pill ${status === 'completed' ? 'pill-sent' : 'pill-not-sent'}" id="cpill-${imageId}">
-            ${status === 'completed' ? 'Sent' : 'Not Sent'}
+          <span class="status-pill ${sentPillClass}" id="cpill-${imageId}">
+            ${sentPillText}
           </span>
           <span class="status-pill ${dbSaved ? 'pill-db-uploaded' : 'pill-db-pending'}" id="dbpill-${imageId}" style="margin-left: 6px;">
             ${dbSaved ? 'DB: Saved' : 'DB: Pending'}
@@ -281,6 +292,9 @@ function upsertCard(imageId, status, extra = {}) {
       if (status === 'completed') {
         pill.className = 'status-pill pill-sent';
         pill.textContent = 'Sent';
+      } else if (status === 'generated') {
+        pill.className = 'status-pill pill-qr-sent';
+        pill.textContent = 'QR Sent';
       } else {
         pill.className = 'status-pill pill-not-sent';
         pill.textContent = 'Not Sent';
@@ -288,7 +302,7 @@ function upsertCard(imageId, status, extra = {}) {
     }
     const dbPill = document.getElementById(`dbpill-${imageId}`);
     if (dbPill) {
-      const dbSaved = ['uploaded', 'no-match', 'completed'].includes(status);
+      const dbSaved = ['uploaded', 'no-match', 'completed', 'generated'].includes(status);
       dbPill.className = `status-pill ${dbSaved ? 'pill-db-uploaded' : 'pill-db-pending'}`;
       dbPill.textContent = dbSaved ? 'DB: Saved' : 'DB: Pending';
     }
