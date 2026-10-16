@@ -302,50 +302,84 @@ function normalisePhone(phone) {
   return digits;
 }
 
+async function sendSingleWhatsAppTemplate(normalised, templateName, type, imageUrl) {
+  const payload = {
+    messaging_product: "whatsapp",
+    to: normalised,
+    type: "template",
+    template: {
+      name: templateName,
+      language: { code: "en" },
+    },
+  };
+
+  if (type === 'image' && imageUrl) {
+    payload.template.components = [
+      {
+        type: "header",
+        parameters: [
+          {
+            type: "image",
+            image: { link: imageUrl },
+          },
+        ],
+      },
+    ];
+  }
+
+  const response = await axios.post(
+    `https://graph.facebook.com/v25.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`,
+    payload,
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      timeout: 15000,
+    },
+  );
+
+  return response.data?.messages?.[0]?.id ?? 'n/a';
+}
+
 async function sendWhatsApp(phone, imageUrl, userName) {
   const normalised = normalisePhone(phone);
-  log('info', `📲 Sending WhatsApp to ${normalised} (original: ${phone})…`);
+  const cfg = loadConfig();
+  const template1 = getWhatsAppTemplateName(cfg);
+
+  log('info', `📲 Sending 1st WhatsApp message (${template1}) to ${normalised} (original: ${phone})…`);
 
   try {
-    const response = await axios.post(
-      `https://graph.facebook.com/v25.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`,
-      {
-        messaging_product: "whatsapp",
-        to: normalised,
-        type: "template",
-        template: {
-          name: getWhatsAppTemplateName(),
-          language: { code: "en" },
-          components: [
-            {
-              type: "header",
-              parameters: [
-                {
-                  type: "image",
-                  image: { link: imageUrl },
-                },
-              ],
-            },
-          ],
-        },
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-        timeout: 15000,
-      },
-    );
-
-    log('info', `✅ WhatsApp sent to ${normalised} — message id: ${response.data?.messages?.[0]?.id ?? 'n/a'}`);
+    const msgId1 = await sendSingleWhatsAppTemplate(normalised, template1, 'image', imageUrl);
+    log('info', `✅ 1st WhatsApp sent to ${normalised} — message id: ${msgId1}`);
   } catch (err) {
     // Extract the real Meta API error from the response body
     const apiErr = err?.response?.data?.error;
     const detail = apiErr
       ? `[${apiErr.code}] ${apiErr.message}${apiErr.error_data?.details ? ' — ' + apiErr.error_data.details : ''}`
       : err.message;
-    throw new Error(`WhatsApp API error: ${detail}`);
+    throw new Error(`WhatsApp API error (Template 1: ${template1}): ${detail}`);
+  }
+
+  // Optional 2nd WhatsApp message
+  if (cfg.whatsappSecondTemplateEnabled && cfg.whatsappSecondTemplate) {
+    const delaySec = Math.max(1, Math.min(30, Number(cfg.whatsappSecondTemplateDelay) || 3));
+    log('info', `⏳ Waiting ${delaySec}s before sending 2nd message so photo loads and arrives first…`);
+    await sleep(delaySec * 1000);
+
+    const template2 = String(cfg.whatsappSecondTemplate).trim().toLowerCase();
+    const type2 = cfg.whatsappSecondTemplateType === 'text' ? 'text' : 'image';
+    log('info', `📲 Sending 2nd WhatsApp message (${template2}, type: ${type2}) to ${normalised}…`);
+    try {
+      const msgId2 = await sendSingleWhatsAppTemplate(normalised, template2, type2, imageUrl);
+      log('info', `✅ 2nd WhatsApp sent to ${normalised} — message id: ${msgId2}`);
+    } catch (err) {
+      const apiErr = err?.response?.data?.error;
+      const detail = apiErr
+        ? `[${apiErr.code}] ${apiErr.message}${apiErr.error_data?.details ? ' — ' + apiErr.error_data.details : ''}`
+        : err.message;
+      log('warn', `⚠️ WhatsApp 2nd message failed (${template2}): ${detail}`);
+    }
   }
 }
 
@@ -796,6 +830,54 @@ ipcMain.handle('set-whatsapp-template', (_, name) => {
   if (valid) saveConfig({ whatsappTemplate });
   log('info', `💬 WhatsApp template set to ${whatsappTemplate}`);
   return { whatsappTemplate };
+});
+
+ipcMain.handle('get-whatsapp-settings', () => {
+  const cfg = loadConfig();
+  return {
+    template1: getWhatsAppTemplateName(cfg),
+    secondEnabled: !!cfg.whatsappSecondTemplateEnabled,
+    template2: cfg.whatsappSecondTemplate || '',
+    template2Type: cfg.whatsappSecondTemplateType || 'image',
+    delay: Number(cfg.whatsappSecondTemplateDelay) || 3,
+  };
+});
+
+ipcMain.handle('set-whatsapp-settings', (_, settings = {}) => {
+  const updates = {};
+  if (typeof settings.template1 === 'string') {
+    const cleaned = settings.template1.trim().toLowerCase();
+    if (/^[a-z0-9_]+$/.test(cleaned)) {
+      updates.whatsappTemplate = cleaned;
+    }
+  }
+  if (typeof settings.secondEnabled === 'boolean') {
+    updates.whatsappSecondTemplateEnabled = settings.secondEnabled;
+  }
+  if (typeof settings.template2 === 'string') {
+    const cleaned2 = settings.template2.trim().toLowerCase();
+    if (/^[a-z0-9_]*$/.test(cleaned2)) {
+      updates.whatsappSecondTemplate = cleaned2;
+    }
+  }
+  if (['image', 'text'].includes(settings.template2Type)) {
+    updates.whatsappSecondTemplateType = settings.template2Type;
+  }
+  if (typeof settings.delay === 'number' || (typeof settings.delay === 'string' && settings.delay)) {
+    const delayNum = Math.max(1, Math.min(30, Number(settings.delay) || 3));
+    updates.whatsappSecondTemplateDelay = delayNum;
+  }
+
+  saveConfig(updates);
+  const cfg = loadConfig();
+  log('info', `💬 WhatsApp settings updated: T1="${cfg.whatsappTemplate || DEFAULT_WHATSAPP_TEMPLATE}", 2ndMsg=${cfg.whatsappSecondTemplateEnabled ? 'ON ("' + (cfg.whatsappSecondTemplate || 'none') + '", ' + (cfg.whatsappSecondTemplateType || 'image') + ', delay ' + (cfg.whatsappSecondTemplateDelay || 3) + 's)' : 'OFF'}`);
+  return {
+    template1: getWhatsAppTemplateName(cfg),
+    secondEnabled: !!cfg.whatsappSecondTemplateEnabled,
+    template2: cfg.whatsappSecondTemplate || '',
+    template2Type: cfg.whatsappSecondTemplateType || 'image',
+    delay: Number(cfg.whatsappSecondTemplateDelay) || 3,
+  };
 });
 
 ipcMain.handle('get-rotate-setting', () => isRotate180Enabled());

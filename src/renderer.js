@@ -20,7 +20,13 @@ const btnStop         = document.getElementById('btn-stop');
 const btnToggleLog    = document.getElementById('btn-toggle-log');
 const btnRetry        = document.getElementById('btn-retry');
 const btnRotateToggle = document.getElementById('btn-rotate-toggle');
-const templateInput   = document.getElementById('whatsapp-template-input');
+const templateInput            = document.getElementById('whatsapp-template-input');
+const btnSecondTemplateToggle = document.getElementById('btn-second-template-toggle');
+const secondTemplateStatusText = document.getElementById('second-template-status-text');
+const secondTemplateOptions    = document.getElementById('second-template-options');
+const secondTemplateInput      = document.getElementById('whatsapp-second-template-input');
+const secondTemplateTypeSelect = document.getElementById('whatsapp-second-template-type');
+const secondTemplateDelayInput = document.getElementById('whatsapp-second-template-delay');
 const rotateStatusText = document.getElementById('rotate-status-text');
 const btnClearLog     = document.getElementById('btn-clear-log');
 const contentArea     = document.getElementById('content-area');
@@ -42,6 +48,16 @@ function setRotateToggleUi(enabled) {
   rotateStatusText.textContent = enabled ? 'On' : 'Off';
 }
 
+function setSecondTemplateToggleUi(enabled) {
+  if (!btnSecondTemplateToggle) return;
+  btnSecondTemplateToggle.classList.toggle('is-on', enabled);
+  btnSecondTemplateToggle.setAttribute('aria-checked', enabled ? 'true' : 'false');
+  if (secondTemplateStatusText) secondTemplateStatusText.textContent = enabled ? 'On' : 'Off';
+  if (secondTemplateOptions) {
+    secondTemplateOptions.style.display = enabled ? 'flex' : 'none';
+  }
+}
+
 templateInput.addEventListener('change', async () => {
   try {
     const { whatsappTemplate } = await window.api.setWhatsappTemplate(templateInput.value);
@@ -53,6 +69,60 @@ templateInput.addEventListener('change', async () => {
 templateInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') templateInput.blur();
 });
+
+if (btnSecondTemplateToggle) {
+  btnSecondTemplateToggle.addEventListener('click', async () => {
+    const next = !btnSecondTemplateToggle.classList.contains('is-on');
+    btnSecondTemplateToggle.disabled = true;
+    try {
+      const res = await window.api.setWhatsappSettings({ secondEnabled: next });
+      setSecondTemplateToggleUi(res.secondEnabled);
+    } catch (err) {
+      appendLog({ level: 'error', message: `Failed to update 2nd template toggle: ${err.message}`, ts: new Date().toISOString() });
+    } finally {
+      btnSecondTemplateToggle.disabled = false;
+    }
+  });
+}
+
+if (secondTemplateInput) {
+  secondTemplateInput.addEventListener('change', async () => {
+    try {
+      const res = await window.api.setWhatsappSettings({ template2: secondTemplateInput.value });
+      secondTemplateInput.value = res.template2;
+    } catch (err) {
+      appendLog({ level: 'error', message: `Failed to update 2nd WhatsApp template: ${err.message}`, ts: new Date().toISOString() });
+    }
+  });
+  secondTemplateInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') secondTemplateInput.blur();
+  });
+}
+
+if (secondTemplateTypeSelect) {
+  secondTemplateTypeSelect.addEventListener('change', async () => {
+    try {
+      await window.api.setWhatsappSettings({ template2Type: secondTemplateTypeSelect.value });
+    } catch (err) {
+      appendLog({ level: 'error', message: `Failed to update 2nd template type: ${err.message}`, ts: new Date().toISOString() });
+    }
+  });
+}
+
+if (secondTemplateDelayInput) {
+  secondTemplateDelayInput.addEventListener('change', async () => {
+    try {
+      const val = parseInt(secondTemplateDelayInput.value, 10) || 3;
+      const res = await window.api.setWhatsappSettings({ delay: val });
+      secondTemplateDelayInput.value = res.delay || 3;
+    } catch (err) {
+      appendLog({ level: 'error', message: `Failed to update 2nd template delay: ${err.message}`, ts: new Date().toISOString() });
+    }
+  });
+  secondTemplateDelayInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') secondTemplateDelayInput.blur();
+  });
+}
 
 btnRotateToggle.addEventListener('click', async () => {
   const next = !btnRotateToggle.classList.contains('is-on');
@@ -1180,7 +1250,16 @@ btnToggleLog.addEventListener('click', () => {
 
   try {
     setRotateToggleUi(await window.api.getRotateSetting());
-    templateInput.value = await window.api.getWhatsappTemplate();
+    if (window.api.getWhatsappSettings) {
+      const waSettings = await window.api.getWhatsappSettings();
+      templateInput.value = waSettings.template1;
+      setSecondTemplateToggleUi(waSettings.secondEnabled);
+      if (secondTemplateInput) secondTemplateInput.value = waSettings.template2;
+      if (secondTemplateTypeSelect) secondTemplateTypeSelect.value = waSettings.template2Type;
+      if (secondTemplateDelayInput && waSettings.delay) secondTemplateDelayInput.value = waSettings.delay;
+    } else {
+      templateInput.value = await window.api.getWhatsappTemplate();
+    }
   } catch (err) {
     console.warn('Failed to load settings:', err);
   }

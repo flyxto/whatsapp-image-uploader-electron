@@ -151,15 +151,66 @@
             <h2>Settings</h2>
           </div>
           <div class="settings-list">
+            <!-- Primary WhatsApp Template -->
             <div class="settings-row">
               <div>
-                <div class="settings-title">WhatsApp template</div>
-                <div class="settings-desc">Meta template name used when sending the photo.</div>
+                <div class="settings-title">Primary WhatsApp Template</div>
+                <div class="settings-desc">Meta template name used for photo delivery.</div>
               </div>
               <div class="settings-control">
                 <input id="whatsapp-template-input" class="settings-input" type="text" spellcheck="false" autocomplete="off" value="pop_culture" />
               </div>
             </div>
+
+            <!-- Second WhatsApp Message Toggle -->
+            <div class="settings-row">
+              <div>
+                <div class="settings-title">Send 2nd WhatsApp Message</div>
+                <div class="settings-desc">Send two messages to the user in one delivery using two templates.</div>
+              </div>
+              <div class="settings-control">
+                <span class="status-value" id="second-template-status-text">Off</span>
+                <button type="button" class="toggle-switch" id="btn-second-template-toggle" role="switch" aria-checked="false" aria-label="Send 2nd WhatsApp message"></button>
+              </div>
+            </div>
+
+            <!-- Second Template Options (Shown when toggle is ON) -->
+            <div id="second-template-options" style="display: none; flex-direction: column; gap: 10px; padding-left: 12px; border-left: 2px solid var(--accent); margin-left: 4px;">
+              <div class="settings-row">
+                <div>
+                  <div class="settings-title">Second Template Name</div>
+                  <div class="settings-desc">Meta template name for the 2nd message.</div>
+                </div>
+                <div class="settings-control">
+                  <input id="whatsapp-second-template-input" class="settings-input" type="text" spellcheck="false" autocomplete="off" placeholder="e.g. thank_you" />
+                </div>
+              </div>
+
+              <div class="settings-row">
+                <div>
+                  <div class="settings-title">Second Template Type</div>
+                  <div class="settings-desc">Whether the 2nd message has the photo or is text only.</div>
+                </div>
+                <div class="settings-control">
+                  <select id="whatsapp-second-template-type" class="settings-input" style="width: 180px;">
+                    <option value="image">Image (with photo)</option>
+                    <option value="text">Text only (no photo)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="settings-row">
+                <div>
+                  <div class="settings-title">Delay before 2nd Message</div>
+                  <div class="settings-desc">Seconds to wait so WhatsApp loads and delivers the photo first.</div>
+                </div>
+                <div class="settings-control">
+                  <input id="whatsapp-second-template-delay" class="settings-input" type="number" min="1" max="30" value="3" style="width: 80px; text-align: center;" />
+                  <span style="font-size: 12px; color: var(--text-muted);">sec</span>
+                </div>
+              </div>
+            </div>
+
             <div class="settings-row">
               <div>
                 <div class="settings-title">Rotate 180°</div>

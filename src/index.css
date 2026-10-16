@@ -289,6 +289,13 @@ body { display: flex; }
 .settings-input:focus {
   border-color: var(--accent);
 }
+select.settings-input {
+  cursor: pointer;
+}
+select.settings-input option {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
 .settings-row {
   display: flex;
   align-items: center;
