@@ -686,24 +686,16 @@ async function retryWaiting() {
 
   try {
     const waitingIds = Array.from(waitingFiles.keys());
+    const docs = await db.batchFind(waitingIds);
 
-    // Ask API for all waiting IDs that now have a phone number
-    const claimedDocs = await db.findWaiting(waitingIds);
-
-    if (claimedDocs.length === 0) return;
-
-    log('info', `🔁 Found ${claimedDocs.length} newly claimed image(s). Enqueuing...`);
-
-    for (const doc of claimedDocs) {
-      const filePath = waitingFiles.get(doc.imageId);
-      
-      if (processingSet.has(doc.imageId)) continue;
-
-      if (filePath && fs.existsSync(filePath)) {
-        enqueueImage(filePath);
-      } else {
-        log('warn', `🗑️ File gone: ${filePath}`, doc.imageId);
+    for (const doc of docs) {
+      if (doc.status === 'generated' || doc.qrActive) {
         waitingFiles.delete(doc.imageId);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('image-status', { imageId: doc.imageId, status: 'generated' });
+        }
+      } else if (doc.phone && !processingSet.has(doc.imageId)) {
+        enqueueImage(waitingFiles.get(doc.imageId));
       }
     }
   } catch (err) {
