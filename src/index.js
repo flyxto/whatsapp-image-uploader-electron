@@ -4,24 +4,73 @@ const { app, BrowserWindow, ipcMain, dialog, nativeImage, shell } = require('ele
 app.setName('whatsapp-booth');
 const path = require('node:path');
 const fs = require('node:fs');
-const dns = require('node:dns');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
-
-// Force use of Google DNS to prevent ECONNREFUSED on MongoDB SRV queries
-try {
-  dns.setServers(['8.8.8.8', '8.8.4.4']);
-} catch (e) {
-  console.warn('Failed to set DNS servers:', e);
-}
 
 // ── Dependencies (loaded after dotenv) ────────────────────────────────────────
 const chokidar = require('chokidar');
 const axios = require('axios');
-const { MongoClient } = require('mongodb');
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const sharp = require('sharp');
 sharp.cache(false);
+
+// ── Mongo API Server config ───────────────────────────────────────────────────
+const API_BASE = process.env.MONGO_API_URL || 'http://localhost:4000';
+
+/** Thin wrapper — all DB calls go through the Express API server. */
+const db = {
+  async health() {
+    const r = await axios.get(`${API_BASE}/health`, { timeout: 5000 });
+    return r.data;
+  },
+  async findOne(imageId) {
+    const r = await axios.get(`${API_BASE}/users/${encodeURIComponent(imageId)}`, { timeout: 8000 });
+    return r.data.doc;
+  },
+  async findByCode(code) {
+    const r = await axios.get(`${API_BASE}/users/code/${encodeURIComponent(code)}`, { timeout: 8000 });
+    return r.data.doc;
+  },
+  async batchFind(ids) {
+    if (!ids.length) return [];
+    const r = await axios.post(`${API_BASE}/users/batch-find`, { ids }, { timeout: 10000 });
+    return r.data.docs;
+  },
+  async upsert(imageId, fields) {
+    const r = await axios.post(`${API_BASE}/users/upsert`, { imageId, ...fields }, { timeout: 10000 });
+    return r.data.doc;
+  },
+  async update(imageId, fields) {
+    await axios.patch(`${API_BASE}/users/${encodeURIComponent(imageId)}`, fields, { timeout: 8000 });
+  },
+  async linkCode(code, newImageId) {
+    const r = await axios.patch(`${API_BASE}/users/${encodeURIComponent(code)}/link`, { newImageId }, { timeout: 8000 });
+    return r.data.doc;
+  },
+  async deleteOne(imageId) {
+    await axios.delete(`${API_BASE}/users/${encodeURIComponent(imageId)}`, { timeout: 8000 });
+  },
+  async findWaiting(ids) {
+    if (!ids.length) return [];
+    const r = await axios.post(`${API_BASE}/users/waiting`, { ids }, { timeout: 8000 });
+    return r.data.docs;
+  },
+  async retryFailed() {
+    const r = await axios.post(`${API_BASE}/users/retry-failed`, {}, { timeout: 10000 });
+    return r.data.count;
+  },
+  async stats() {
+    const r = await axios.get(`${API_BASE}/stats`, { timeout: 8000 });
+    return r.data;
+  },
+  async getAllEvents() {
+    const r = await axios.get(`${API_BASE}/events`, { timeout: 8000 });
+    return r.data.events;
+  },
+  async saveEvent(eventName, eventPrefix) {
+    await axios.post(`${API_BASE}/events`, { eventName, eventPrefix }, { timeout: 8000 });
+  },
+};
 const QRCode = require('qrcode');
 
 // ── Cloudflare R2 client ──────────────────────────────────────────────────────
@@ -34,9 +83,7 @@ const s3 = new S3Client({
   },
 });
 
-// ── MongoDB Native Driver ─────────────────────────────────────────────────────
-let mongoClient;
-let usersCollection;
+// ── DB state (driven by API health polling) ──────────────────────────────────
 let dbConnected = false;
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -167,28 +214,35 @@ function getCodeFromImageId(imageId) {
 }
 
 
-// ── MongoDB ───────────────────────────────────────────────────────────────────
+// ── API connection / health poll ─────────────────────────────────────────────
 
 async function connectMongo() {
-  if (dbConnected) return;
   try {
-    mongoClient = new MongoClient(process.env.MONGODB_URI, {
-      serverSelectionTimeoutMS: 8000,
-    });
-    await mongoClient.connect();
-    const db = mongoClient.db();
-    usersCollection = db.collection('photobooth_users');
-    
-    // Ensure index on imageId
-    await usersCollection.createIndex({ imageId: 1 }, { unique: true }).catch(() => {});
-
-    dbConnected = true;
-    log('info', '✅ MongoDB connected');
-    if (mainWindow) mainWindow.webContents.send('db-status', { connected: true });
+    const health = await db.health();
+    const wasConnected = dbConnected;
+    dbConnected = !!health.dbConnected;
+    if (dbConnected && !wasConnected) {
+      log('info', '✅ API server + MongoDB connected');
+      if (mainWindow) mainWindow.webContents.send('db-status', { connected: true });
+    } else if (!dbConnected && wasConnected) {
+      log('warn', '⚠️ API server reachable but MongoDB disconnected');
+      if (mainWindow) mainWindow.webContents.send('db-status', { connected: false });
+    } else if (!dbConnected) {
+      log('warn', '⚠️ API server reachable — waiting for MongoDB...');
+    }
   } catch (err) {
-    log('error', `❌ MongoDB connection failed: ${err.message}`);
-    if (mainWindow) mainWindow.webContents.send('db-status', { connected: false, error: err.message });
+    if (dbConnected) {
+      log('error', `❌ Cannot reach API server: ${err.message}`);
+      if (mainWindow) mainWindow.webContents.send('db-status', { connected: false, error: err.message });
+    }
+    dbConnected = false;
   }
+}
+
+/** Poll the API health every 10 seconds to keep dbConnected up-to-date. */
+function startHealthPoll() {
+  connectMongo();
+  setInterval(connectMongo, 10000);
 }
 
 // ── Cloudflare R2 upload ──────────────────────────────────────────────────────
@@ -390,9 +444,9 @@ async function processImage(filePath) {
   }
 
   // Fast pre-check: if already completed in DB, skip debounce sleep and return immediately
-  if (usersCollection && dbConnected) {
+  if (dbConnected) {
     try {
-      const doc = await usersCollection.findOne({ imageId });
+      const doc = await db.findOne(imageId);
       if (doc && doc.status === 'completed') {
         log('info', `⏭️  imageId "${imageId}" already completed — skipping lookup`, imageId);
         if (mainWindow && !mainWindow.isDestroyed()) {
@@ -436,18 +490,17 @@ async function processImage(filePath) {
   }
 
   try {
-    if (!usersCollection) throw new Error('MongoDB not connected');
+    if (!dbConnected) throw new Error('API server not connected');
 
-    let doc = await usersCollection.findOne({ imageId });
+    let doc = await db.findOne(imageId);
 
     // Link pre-registration: check if user registered using the short code before the photo was uploaded
     if (!doc) {
       const code = getCodeFromImageId(imageId);
-      const shortDoc = await usersCollection.findOne({ imageId: code });
+      const shortDoc = await db.findByCode(code);
       if (shortDoc) {
         log('info', `🔗 Found pre-registered user by code "${code}". Linking to full imageId "${imageId}"...`, imageId);
-        await usersCollection.updateOne({ _id: shortDoc._id }, { $set: { imageId } });
-        doc = await usersCollection.findOne({ imageId });
+        doc = await db.linkCode(code, imageId);
       }
     }
 
@@ -490,15 +543,12 @@ async function processImage(filePath) {
       imageUrl = await uploadToCloudflare(uploadPath, imageId);
       if (tempFile && fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
       
-      // Upsert DB with imageUrl and code
-      doc = await usersCollection.findOneAndUpdate(
-        { imageId },
-        { 
-          $set: { imageUrl, status: 'uploaded', code: getCodeFromImageId(imageId) },
-          $setOnInsert: { createdAt: new Date() }
-        },
-        { returnDocument: 'after', upsert: true }
-      );
+      // Upsert via API with imageUrl and code
+      doc = await db.upsert(imageId, {
+        imageUrl,
+        status: 'uploaded',
+        code:   getCodeFromImageId(imageId),
+      });
       
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('image-status', { imageId, status: 'uploaded', imageUrl, user: doc ? { name: doc.name, phone: doc.phone } : undefined, hide: doc?.hide });
@@ -520,13 +570,7 @@ async function processImage(filePath) {
     log('info', `👤 Matched user: ${doc.name || 'Unknown'} (${doc.phone})`, imageId);
     await sendWhatsApp(doc.phone, imageUrl, doc.name);
 
-    doc.status = 'completed';
-    doc.completedAt = new Date();
-    await usersCollection.updateOne(
-      { imageId },
-      { $set: { status: doc.status, completedAt: doc.completedAt } }
-    );
-
+    await db.update(imageId, { status: 'completed', completedAt: new Date() });
     waitingFiles.delete(imageId);
 
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -543,8 +587,8 @@ async function processImage(filePath) {
     const code = err?.http_code || err?.error?.http_code || '';
     const full = code ? `[HTTP ${code}] ${msg}` : msg;
     log('error', `❌ Failed to process ${imageId}: ${full}`, imageId);
-    if (usersCollection) {
-      await usersCollection.updateOne({ imageId }, { $set: { status: 'failed', errorMsg: full } }).catch(() => {});
+    if (dbConnected) {
+      await db.update(imageId, { status: 'failed', errorMsg: full }).catch(() => {});
     }
     if (mainWindow) mainWindow.webContents.send('image-status', { imageId, status: 'failed', error: full });
   } finally {
@@ -561,8 +605,8 @@ async function getInitialImages(folderPath) {
     const ids = imageFiles.map(f => extractImageId(f));
 
     let dbRecords = [];
-    if (usersCollection && dbConnected && ids.length > 0) {
-      dbRecords = await usersCollection.find({ imageId: { $in: ids } }).toArray();
+    if (dbConnected && ids.length > 0) {
+      dbRecords = await db.batchFind(ids);
     }
     const dbMap = new Map(dbRecords.map(r => [r.imageId, r]));
 
@@ -583,17 +627,10 @@ async function getInitialImages(folderPath) {
         previewUrl = `data:image/jpeg;base64,${thumbBuffer.toString('base64')}`;
       } catch (_) {}
 
-      let status = 'detected';
-      if (doc) {
-        status = doc.status || 'detected';
-      } else {
-        status = 'detected';
-      }
-
       list.push({
         imageId,
         filePath,
-        status,
+        status: doc?.status || 'detected',
         previewUrl,
         imageUrl: doc?.imageUrl,
         user: doc ? { name: doc.name, phone: doc.phone } : undefined,
@@ -611,26 +648,22 @@ async function getInitialImages(folderPath) {
 }
 
 async function retryWaiting() {
-  if (waitingFiles.size === 0 || !usersCollection || !dbConnected) return;
+  if (waitingFiles.size === 0 || !dbConnected) return;
 
   try {
     const waitingIds = Array.from(waitingFiles.keys());
 
-    // Query MongoDB for all waiting IDs in ONE query to see if any now have a phone number
-    const claimedDocs = await usersCollection.find({
-      imageId: { $in: waitingIds },
-      phone: { $exists: true, $ne: null }
-    }).toArray();
+    // Ask API for all waiting IDs that now have a phone number
+    const claimedDocs = await db.findWaiting(waitingIds);
 
     if (claimedDocs.length === 0) return;
 
     log('info', `🔁 Found ${claimedDocs.length} newly claimed image(s). Enqueuing...`);
 
-    // Enqueue only the photos that were actually claimed
     for (const doc of claimedDocs) {
       const filePath = waitingFiles.get(doc.imageId);
       
-      if (processingSet.has(doc.imageId)) continue; // skip if already processing
+      if (processingSet.has(doc.imageId)) continue;
 
       if (filePath && fs.existsSync(filePath)) {
         enqueueImage(filePath);
@@ -660,7 +693,7 @@ async function startWatcher(folderPath) {
 
   log('info', `👁️  Watching folder: ${folderPath}`);
 
-  // Populate waitingFiles with existing files that are not completed in MongoDB yet
+  // Populate waitingFiles with existing files that are not completed yet
   try {
     if (fs.existsSync(folderPath)) {
       const files = fs.readdirSync(folderPath);
@@ -668,8 +701,8 @@ async function startWatcher(folderPath) {
       const ids = imageFiles.map(f => extractImageId(f));
 
       let dbRecords = [];
-      if (usersCollection && dbConnected && ids.length > 0) {
-        dbRecords = await usersCollection.find({ imageId: { $in: ids } }).toArray();
+      if (dbConnected && ids.length > 0) {
+        dbRecords = await db.batchFind(ids);
       }
       const dbMap = new Map(dbRecords.map(r => [r.imageId, r]));
 
@@ -744,7 +777,7 @@ ipcMain.handle('select-folder', async () => {
 ipcMain.handle('start-watch', async (_, folderPath) => {
   // Persist so it's restored on next launch
   saveConfig({ lastFolder: folderPath });
-  await connectMongo();
+  await connectMongo(); // ensure latest health status before starting
   await startWatcher(folderPath);
   return { success: true };
 });
@@ -784,43 +817,26 @@ ipcMain.handle('get-event-config', () => {
 
 ipcMain.handle('save-event-config', async (_, data) => {
   saveConfig({
-    eventName: data.eventName || '',
+    eventName:   data.eventName   || '',
     eventPrefix: data.eventPrefix || '',
   });
 
   // Try connecting if not connected
   if (!dbConnected) {
-    try {
-      await connectMongo();
-    } catch (_) {}
+    try { await connectMongo(); } catch (_) {}
   }
 
-  // Sync to MongoDB event_config collection
-  if (dbConnected && mongoClient) {
+  // Sync to API server → MongoDB event_config collection
+  if (dbConnected) {
     try {
-      const db = mongoClient.db();
-      const configCol = db.collection('event_config');
       const eventPrefix = (data.eventPrefix || '').toUpperCase().trim();
-      const eventName = (data.eventName || '').trim();
-
+      const eventName   = (data.eventName   || '').trim();
       if (eventPrefix && eventName) {
-        // 1. Save specific event document keyed by prefix
-        await configCol.updateOne(
-          { _id: eventPrefix },
-          {
-            $set: {
-              eventName,
-              eventPrefix,
-              updatedAt: new Date(),
-            },
-          },
-          { upsert: true }
-        );
-
-        log('info', `💾 Synced event config to MongoDB: "${eventName}" [${eventPrefix}]`);
+        await db.saveEvent(eventName, eventPrefix);
+        log('info', `💾 Synced event config via API: "${eventName}" [${eventPrefix}]`);
       }
     } catch (err) {
-      log('error', `⚠️ Failed to sync event config to MongoDB: ${err.message}`);
+      log('error', `⚠️ Failed to sync event config: ${err.message}`);
     }
   }
 
@@ -828,41 +844,19 @@ ipcMain.handle('save-event-config', async (_, data) => {
 });
 
 async function waitForDbConnection(timeoutMs = 5000) {
-  if (dbConnected && mongoClient) return true;
+  if (dbConnected) return true;
   const startTime = Date.now();
   while (!dbConnected && (Date.now() - startTime) < timeoutMs) {
     await new Promise(r => setTimeout(r, 100));
   }
-  return dbConnected && !!mongoClient;
+  return dbConnected;
 }
 
 ipcMain.handle('get-all-events', async () => {
   const isConnected = await waitForDbConnection(5000);
   if (!isConnected) return [];
   try {
-    const db = mongoClient.db();
-    const configCol = db.collection('event_config');
-    // Fetch all events except the active_event placeholder doc
-    const events = await configCol
-      .find({ _id: { $ne: 'active_event' } })
-      .sort({ updatedAt: -1 })
-      .toArray();
-
-    const seen = new Set();
-    const uniqueEvents = [];
-    for (const e of events) {
-      if (e.eventName && e.eventPrefix) {
-        const key = e.eventPrefix.toUpperCase().trim();
-        if (!seen.has(key)) {
-          seen.add(key);
-          uniqueEvents.push({
-            eventName: e.eventName.trim(),
-            eventPrefix: key,
-          });
-        }
-      }
-    }
-    return uniqueEvents;
+    return await db.getAllEvents();
   } catch (err) {
     log('error', `⚠️ Failed to get all events: ${err.message}`);
     return [];
@@ -877,10 +871,10 @@ ipcMain.handle('delete-image', async (_, imageId) => {
   try {
     log('info', `🗑️ Deletion requested for image ${imageId}`, imageId);
 
-    // 1. Delete from MongoDB
-    if (usersCollection && dbConnected) {
-      await usersCollection.deleteOne({ imageId });
-      log('info', `💾 Deleted MongoDB record for ${imageId}`, imageId);
+    // 1. Delete via API
+    if (dbConnected) {
+      await db.deleteOne(imageId);
+      log('info', `💾 Deleted record for ${imageId} via API`, imageId);
     }
 
     // 2. Delete file locally (move to trash)
@@ -897,7 +891,7 @@ ipcMain.handle('delete-image', async (_, imageId) => {
       }
     }
 
-    // 3. Remove from retry queue (waitingFiles) in case it was there
+    // 3. Remove from retry queue
     waitingFiles.delete(imageId);
 
     return { success: true };
@@ -910,12 +904,10 @@ ipcMain.handle('delete-image', async (_, imageId) => {
 
 ipcMain.handle('toggle-hide-image', async (_, imageId, hide) => {
   try {
-    if (usersCollection && dbConnected) {
-      await usersCollection.updateOne({ imageId }, { $set: { hide: hide } });
-      log('info', `👁️ Image ${imageId} hide status set to ${hide}`, imageId);
-      return { success: true };
-    }
-    return { success: false, error: 'Database not connected' };
+    if (!dbConnected) return { success: false, error: 'API server not connected' };
+    await db.update(imageId, { hide });
+    log('info', `👁️ Image ${imageId} hide status set to ${hide}`, imageId);
+    return { success: true };
   } catch (err) {
     const msg = err.message || String(err);
     log('error', `❌ Failed to hide image ${imageId}: ${msg}`, imageId);
@@ -938,22 +930,19 @@ ipcMain.handle('stop-watch', () => {
 ipcMain.handle('get-db-status', () => ({ connected: dbConnected }));
 
 ipcMain.handle('retry-failed', async () => {
-  if (!usersCollection || !dbConnected) return { error: 'MongoDB not connected' };
-  const failed = await usersCollection.find({ status: 'failed' }).toArray();
-  await usersCollection.updateMany({ status: 'failed' }, { $set: { status: 'pending', errorMsg: null } });
-  return { count: failed.length };
+  if (!dbConnected) return { error: 'API server not connected' };
+  try {
+    const count = await db.retryFailed();
+    return { count };
+  } catch (err) {
+    return { error: err.message };
+  }
 });
 
 ipcMain.handle('get-stats', async () => {
-  if (!usersCollection || !dbConnected) return {};
+  if (!dbConnected) return {};
   try {
-    const [pending, processing, completed, failed] = await Promise.all([
-      usersCollection.countDocuments({ status: { $in: ['pending', 'uploaded'] } }),
-      usersCollection.countDocuments({ status: 'processing' }),
-      usersCollection.countDocuments({ status: 'completed' }),
-      usersCollection.countDocuments({ status: 'failed' }),
-    ]);
-    return { pending, processing, completed, failed };
+    return await db.stats();
   } catch (err) {
     log('error', `get-stats error: ${err.message}`);
     return {};
@@ -1020,11 +1009,11 @@ ipcMain.handle('manual-send', async (_, { phone, imageId }) => {
   try {
     log('info', `📤 Manual send requested for ${imageId} → ${phone}`, imageId);
 
-    if (!usersCollection || !dbConnected) {
-      throw new Error('MongoDB unavailable — cannot send without the stored image URL');
+    if (!dbConnected) {
+      throw new Error('API server unavailable — cannot send without the stored image URL');
     }
 
-    const existing = await usersCollection.findOne({ imageId });
+    const existing = await db.findOne(imageId);
     const imageUrl = existing?.imageUrl;
     if (!imageUrl) {
       throw new Error('No image URL stored for this photo yet');
@@ -1033,17 +1022,12 @@ ipcMain.handle('manual-send', async (_, { phone, imageId }) => {
     // Send WhatsApp with the URL already saved from the first upload
     await sendWhatsApp(phone, imageUrl, null);
 
-    await usersCollection.updateOne(
-      { imageId },
-      {
-        $set: {
-          phone,
-          status:      'completed',
-          completedAt: new Date(),
-          code:        getCodeFromImageId(imageId),
-        },
-      }
-    );
+    await db.update(imageId, {
+      phone,
+      status:      'completed',
+      completedAt: new Date(),
+      code:        getCodeFromImageId(imageId),
+    });
     log('info', `💾 Saved manual send record for ${imageId}`, imageId);
 
     // Remove from retry queue so the loop stops re-checking this file
@@ -1087,8 +1071,8 @@ const createWindow = () => {
 
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
 
-  // Connect to DB on start
-  connectMongo();
+  // Start health polling (connect + keep-alive every 10s)
+  startHealthPoll();
 };
 
 app.whenReady().then(() => {
@@ -1100,6 +1084,5 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', async () => {
   if (watcher) watcher.close();
-  if (mongoClient) await mongoClient.close();
   if (process.platform !== 'darwin') app.quit();
 });
