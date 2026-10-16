@@ -33,6 +33,8 @@ const statPending     = document.getElementById('stat-pending');
 const statProcessing  = document.getElementById('stat-processing');
 const statCompleted   = document.getElementById('stat-completed');
 const statFailed      = document.getElementById('stat-failed');
+const statQrSent      = document.getElementById('stat-qr-sent');
+const statQrNotSent   = document.getElementById('stat-qr-not-sent');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -236,10 +238,10 @@ function upsertCard(imageId, status, extra = {}) {
     const dbSaved = ['uploaded', 'no-match', 'completed', 'generated'].includes(status);
 
     let sentPillClass = 'pill-not-sent';
-    let sentPillText = 'Not Sent';
+    let sentPillText = 'WA Not Sent';
     if (status === 'completed') {
       sentPillClass = 'pill-sent';
-      sentPillText = 'Sent';
+      sentPillText = 'WA Sent';
     } else if (status === 'generated') {
       sentPillClass = 'pill-qr-sent';
       sentPillText = 'QR Sent';
@@ -291,13 +293,13 @@ function upsertCard(imageId, status, extra = {}) {
     if (pill) {
       if (status === 'completed') {
         pill.className = 'status-pill pill-sent';
-        pill.textContent = 'Sent';
+        pill.textContent = 'WA Sent';
       } else if (status === 'generated') {
         pill.className = 'status-pill pill-qr-sent';
         pill.textContent = 'QR Sent';
       } else {
         pill.className = 'status-pill pill-not-sent';
-        pill.textContent = 'Not Sent';
+        pill.textContent = 'WA Not Sent';
       }
     }
     const dbPill = document.getElementById(`dbpill-${imageId}`);
@@ -373,13 +375,7 @@ function upsertCard(imageId, status, extra = {}) {
   }
 
   // Update tab counts
-  let completedCount = 0;
-  for (const card of imageCards.values()) {
-    if (card.classList.contains('completed')) completedCount++;
-  }
-  document.getElementById('tab-count-all').textContent = imageCards.size;
-  document.getElementById('tab-count-sent').textContent = completedCount;
-  document.getElementById('tab-count-not-sent').textContent = imageCards.size - completedCount;
+  updateTabCounts();
 
   // Bind delete button click
   const deleteBtn = card.querySelector('.card-delete-btn');
@@ -452,31 +448,60 @@ function updateCardActions() {
 }
 
 
-// ── Stats refresh ─────────────────────────────────────────────────────────────
+// ── Stats and Tab Counts refresh ─────────────────────────────────────────────
+function updateTabCounts() {
+  let whatsappSent = 0;
+  let qrSent = 0;
+  for (const card of imageCards.values()) {
+    if (card.classList.contains('completed')) whatsappSent++;
+    if (card.classList.contains('generated')) qrSent++;
+  }
+  const totalCount = imageCards.size;
+  const tabAll = document.getElementById('tab-count-all');
+  const tabSent = document.getElementById('tab-count-sent');
+  const tabNotSent = document.getElementById('tab-count-not-sent');
+  const tabQrSent = document.getElementById('tab-count-qr-sent');
+  const tabQrNotSent = document.getElementById('tab-count-qr-not-sent');
+
+  if (tabAll) tabAll.textContent = totalCount;
+  if (tabSent) tabSent.textContent = whatsappSent;
+  if (tabNotSent) tabNotSent.textContent = totalCount - whatsappSent;
+  if (tabQrSent) tabQrSent.textContent = qrSent;
+  if (tabQrNotSent) tabQrNotSent.textContent = totalCount - qrSent;
+}
 
 function refreshStats() {
-  let pending = 0;
+  updateTabCounts();
+
+  let whatsappSent = 0;
+  let qrSent = 0;
   let processing = 0;
-  let completed = 0;
   let failed = 0;
 
   for (const card of imageCards.values()) {
     if (card.classList.contains('completed')) {
-      completed++;
-    } else if (card.classList.contains('failed')) {
-      failed++;
-    } else if (card.classList.contains('processing')) {
+      whatsappSent++;
+    }
+    if (card.classList.contains('generated')) {
+      qrSent++;
+    }
+    if (card.classList.contains('processing')) {
       processing++;
-    } else {
-      // Anything else (detected, uploaded, no-match, etc) is "pending"
-      pending++;
+    }
+    if (card.classList.contains('failed')) {
+      failed++;
     }
   }
 
-  statPending.textContent    = pending;
-  statProcessing.textContent = processing;
-  statCompleted.textContent  = completed;
-  statFailed.textContent     = failed;
+  const whatsappNotSent = imageCards.size - whatsappSent;
+  const qrNotSent = imageCards.size - qrSent;
+
+  if (statCompleted) statCompleted.textContent = imageCards.size ? whatsappSent : '—';
+  if (statPending) statPending.textContent = imageCards.size ? whatsappNotSent : '—';
+  if (statQrSent) statQrSent.textContent = imageCards.size ? qrSent : '—';
+  if (statQrNotSent) statQrNotSent.textContent = imageCards.size ? qrNotSent : '—';
+  if (statProcessing) statProcessing.textContent = imageCards.size ? processing : '—';
+  if (statFailed) statFailed.textContent = imageCards.size ? failed : '—';
 }
 
 // Poll stats every 5 s
@@ -1095,6 +1120,10 @@ function applySearch(query) {
       tabMatch = (status === 'completed');
     } else if (currentTab === 'not-sent') {
       tabMatch = (status !== 'completed');
+    } else if (currentTab === 'qr-sent') {
+      tabMatch = (status === 'generated');
+    } else if (currentTab === 'qr-not-sent') {
+      tabMatch = (status !== 'generated');
     }
     card.classList.toggle('tab-hidden', !tabMatch);
 
@@ -1119,7 +1148,11 @@ function applySearch(query) {
     if (q) {
       noResultsEl.innerHTML = `<div class="no-results-icon">🔍</div><p>No photos matching <strong>"${q}"</strong></p>`;
     } else {
-       const tabName = currentTab === 'sent' ? 'Sent' : 'Not Sent';
+       let tabName = 'photos';
+       if (currentTab === 'sent') tabName = 'WhatsApp Sent';
+       else if (currentTab === 'not-sent') tabName = 'WhatsApp Not Sent';
+       else if (currentTab === 'qr-sent') tabName = 'QR Sent';
+       else if (currentTab === 'qr-not-sent') tabName = 'QR Not Sent';
        noResultsEl.innerHTML = `<div class="no-results-icon">📁</div><p>No <strong>${tabName}</strong> photos yet.</p>`;
     }
     queueList.appendChild(noResultsEl);
