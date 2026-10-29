@@ -60,16 +60,56 @@ function setSecondTemplateToggleUi(enabled) {
   }
 }
 
-templateInput.addEventListener('change', async () => {
+// Sidebar summary: current template and whether a frame is selected.
+const sidebarTemplate = document.getElementById('sidebar-template');
+const sidebarFrame = document.getElementById('sidebar-frame');
+
+function updateSidebarInfo(template) {
+  if (sidebarTemplate && template !== undefined) {
+    sidebarTemplate.textContent = template;
+    sidebarTemplate.title = template;
+  }
+  if (sidebarFrame) {
+    sidebarFrame.textContent = activeFrame ? `Selected: ${activeFrame}` : 'None selected';
+    sidebarFrame.title = activeFrame || '';
+    sidebarFrame.classList.toggle('is-on', !!activeFrame);
+    sidebarFrame.classList.toggle('is-off', !activeFrame);
+  }
+}
+
+// Template is saved only when Save is clicked (not on blur / leaving the panel).
+const btnSaveSettings = document.getElementById('btn-save-settings');
+const toastEl = document.getElementById('toast');
+let toastTimer;
+
+function showToast(message, isError = false) {
+  if (!toastEl) return;
+  toastEl.textContent = message;
+  toastEl.classList.toggle('error', isError);
+  toastEl.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('show'), isError ? 4000 : 2000);
+}
+
+async function saveSettings() {
   try {
-    const { whatsappTemplate } = await window.api.setWhatsappTemplate(templateInput.value);
+    const { whatsappTemplate, error } = await window.api.setWhatsappTemplate(templateInput.value);
+    if (error) {
+      showToast(error, true);
+      return; // stay on Settings so the user can fix the name
+    }
     templateInput.value = whatsappTemplate;
+    updateSidebarInfo(whatsappTemplate);
+    showToast('Settings saved');
+    showPanel('queue');
   } catch (err) {
     appendLog({ level: 'error', message: `Failed to update WhatsApp template: ${err.message}`, ts: new Date().toISOString() });
   }
-});
+}
+
+if (btnSaveSettings) btnSaveSettings.addEventListener('click', saveSettings);
 templateInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') templateInput.blur();
+  if (e.key === 'Enter') saveSettings();
 });
 
 if (btnSecondTemplateToggle) {
@@ -1285,8 +1325,7 @@ btnToggleLog.addEventListener('click', () => {
     setRotateToggleUi(await window.api.getRotateSetting());
     if (window.api.getWhatsappSettings) {
       const waSettings = await window.api.getWhatsappSettings();
-      templateInput.value = waSettings.template1;
-      setSecondTemplateToggleUi(waSettings.secondEnabled);
+      templateInput.value = waSettings.template1;      setSecondTemplateToggleUi(waSettings.secondEnabled);
       if (secondTemplateInput) secondTemplateInput.value = waSettings.template2;
       if (secondTemplateTypeSelect) secondTemplateTypeSelect.value = waSettings.template2Type;
       if (secondTemplateDelayInput && waSettings.delay) secondTemplateDelayInput.value = waSettings.delay;
@@ -1304,6 +1343,7 @@ btnToggleLog.addEventListener('click', () => {
   } catch (err) {
     console.warn('Failed to get initial active frame:', err);
   }
+  updateSidebarInfo(templateInput.value);
 
   // Load Event Config and populate sidebar on startup
   try {
@@ -1363,6 +1403,10 @@ function showPanel(name) {
     if (el) el.classList.toggle('active', key === name);
   }
   if (name === 'frames') loadFrames();
+  // Discard unsaved edits: show the saved template each time Settings opens.
+  if (name === 'settings') {
+    window.api.getWhatsappTemplate().then((t) => { templateInput.value = t; }).catch(() => {});
+  }
 }
 
 if (navQueue) navQueue.addEventListener('click', () => showPanel('queue'));
@@ -1380,6 +1424,7 @@ async function loadFrames() {
   if (!framesList) return;
   const { frames, activeFrame: backendActiveFrame, framesDir } = await window.api.getFrames();
   activeFrame = backendActiveFrame;
+  updateSidebarInfo();
   framesList.innerHTML = '';
   
   if (frames.length === 0) {

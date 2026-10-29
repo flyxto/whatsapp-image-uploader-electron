@@ -129,11 +129,25 @@ function isRotate180Enabled(cfg = loadConfig()) {
   return cfg.rotate180 !== false;
 }
 
-const DEFAULT_WHATSAPP_TEMPLATE = 'pop_culture';
+const DEFAULT_WHATSAPP_TEMPLATE = 'photo_booth_test';
 
+const isValidTemplateName = (name) => /^[a-z0-9_]+$/.test(name);
+
+// Default template ships in src/whatsapp-template.json, so a fresh PC uses it.
+function getBundledTemplateName() {
+  try {
+    const raw = fs.readFileSync(path.join(__dirname, 'whatsapp-template.json'), 'utf8');
+    const name = String(JSON.parse(raw).template || '').trim().toLowerCase();
+    return isValidTemplateName(name) ? name : DEFAULT_WHATSAPP_TEMPLATE;
+  } catch {
+    return DEFAULT_WHATSAPP_TEMPLATE;
+  }
+}
+
+// A name the user saved in the app overrides the bundled default.
 function getWhatsAppTemplateName(cfg = loadConfig()) {
   const name = String(cfg.whatsappTemplate || '').trim().toLowerCase();
-  return /^[a-z0-9_]+$/.test(name) ? name : DEFAULT_WHATSAPP_TEMPLATE;
+  return isValidTemplateName(name) ? name : getBundledTemplateName();
 }
 
 /** EXIF auto-orient, then optional 180° rotate. */
@@ -344,8 +358,7 @@ async function sendSingleWhatsAppTemplate(normalised, templateName, type, imageU
 
 async function sendWhatsApp(phone, imageUrl, userName) {
   const normalised = normalisePhone(phone);
-  const cfg = loadConfig();
-  const template1 = getWhatsAppTemplateName(cfg);
+  const template1 = getWhatsAppTemplateName();
 
   log('info', `📲 Sending 1st WhatsApp message (${template1}) to ${normalised} (original: ${phone})…`);
 
@@ -361,26 +374,7 @@ async function sendWhatsApp(phone, imageUrl, userName) {
     throw new Error(`WhatsApp API error (Template 1: ${template1}): ${detail}`);
   }
 
-  // Optional 2nd WhatsApp message
-  if (cfg.whatsappSecondTemplateEnabled && cfg.whatsappSecondTemplate) {
-    const delaySec = Math.max(1, Math.min(30, Number(cfg.whatsappSecondTemplateDelay) || 3));
-    log('info', `⏳ Waiting ${delaySec}s before sending 2nd message so photo loads and arrives first…`);
-    await sleep(delaySec * 1000);
-
-    const template2 = String(cfg.whatsappSecondTemplate).trim().toLowerCase();
-    const type2 = cfg.whatsappSecondTemplateType === 'text' ? 'text' : 'image';
-    log('info', `📲 Sending 2nd WhatsApp message (${template2}, type: ${type2}) to ${normalised}…`);
-    try {
-      const msgId2 = await sendSingleWhatsAppTemplate(normalised, template2, type2, imageUrl);
-      log('info', `✅ 2nd WhatsApp sent to ${normalised} — message id: ${msgId2}`);
-    } catch (err) {
-      const apiErr = err?.response?.data?.error;
-      const detail = apiErr
-        ? `[${apiErr.code}] ${apiErr.message}${apiErr.error_data?.details ? ' — ' + apiErr.error_data.details : ''}`
-        : err.message;
-      log('warn', `⚠️ WhatsApp 2nd message failed (${template2}): ${detail}`);
-    }
-  }
+  // The 2nd-message feature is disabled: templates are no longer read from userData.
 }
 
 // ── Frame overlay helper ──────────────────────────────────────────────────────
@@ -817,60 +811,28 @@ ipcMain.handle('get-whatsapp-template', () => getWhatsAppTemplateName());
 
 ipcMain.handle('set-whatsapp-template', (_, name) => {
   const cleaned = String(name || '').trim().toLowerCase();
-  const valid = /^[a-z0-9_]+$/.test(cleaned);
-  const whatsappTemplate = valid ? cleaned : getWhatsAppTemplateName();
-  if (valid) saveConfig({ whatsappTemplate });
+  // Empty input clears the override and goes back to the bundled default.
+  if (cleaned !== '' && !isValidTemplateName(cleaned)) {
+    log('warn', `⚠️ Invalid WhatsApp template name "${cleaned}" — use only lowercase letters, numbers and underscores`);
+    return { whatsappTemplate: getWhatsAppTemplateName(), error: 'Invalid name: use only lowercase letters, numbers and underscores.' };
+  }
+  saveConfig({ whatsappTemplate: cleaned });
+  const whatsappTemplate = getWhatsAppTemplateName();
   log('info', `💬 WhatsApp template set to ${whatsappTemplate}`);
   return { whatsappTemplate };
 });
 
-ipcMain.handle('get-whatsapp-settings', () => {
-  const cfg = loadConfig();
-  return {
-    template1: getWhatsAppTemplateName(cfg),
-    secondEnabled: !!cfg.whatsappSecondTemplateEnabled,
-    template2: cfg.whatsappSecondTemplate || '',
-    template2Type: cfg.whatsappSecondTemplateType || 'image',
-    delay: Number(cfg.whatsappSecondTemplateDelay) || 3,
-  };
+const fixedWhatsAppSettings = () => ({
+  template1: getWhatsAppTemplateName(),
+  secondEnabled: false,
+  template2: '',
+  template2Type: 'image',
+  delay: 3,
 });
 
-ipcMain.handle('set-whatsapp-settings', (_, settings = {}) => {
-  const updates = {};
-  if (typeof settings.template1 === 'string') {
-    const cleaned = settings.template1.trim().toLowerCase();
-    if (/^[a-z0-9_]+$/.test(cleaned)) {
-      updates.whatsappTemplate = cleaned;
-    }
-  }
-  if (typeof settings.secondEnabled === 'boolean') {
-    updates.whatsappSecondTemplateEnabled = settings.secondEnabled;
-  }
-  if (typeof settings.template2 === 'string') {
-    const cleaned2 = settings.template2.trim().toLowerCase();
-    if (/^[a-z0-9_]*$/.test(cleaned2)) {
-      updates.whatsappSecondTemplate = cleaned2;
-    }
-  }
-  if (['image', 'text'].includes(settings.template2Type)) {
-    updates.whatsappSecondTemplateType = settings.template2Type;
-  }
-  if (typeof settings.delay === 'number' || (typeof settings.delay === 'string' && settings.delay)) {
-    const delayNum = Math.max(1, Math.min(30, Number(settings.delay) || 3));
-    updates.whatsappSecondTemplateDelay = delayNum;
-  }
+ipcMain.handle('get-whatsapp-settings', () => fixedWhatsAppSettings());
 
-  saveConfig(updates);
-  const cfg = loadConfig();
-  log('info', `💬 WhatsApp settings updated: T1="${cfg.whatsappTemplate || DEFAULT_WHATSAPP_TEMPLATE}", 2ndMsg=${cfg.whatsappSecondTemplateEnabled ? 'ON ("' + (cfg.whatsappSecondTemplate || 'none') + '", ' + (cfg.whatsappSecondTemplateType || 'image') + ', delay ' + (cfg.whatsappSecondTemplateDelay || 3) + 's)' : 'OFF'}`);
-  return {
-    template1: getWhatsAppTemplateName(cfg),
-    secondEnabled: !!cfg.whatsappSecondTemplateEnabled,
-    template2: cfg.whatsappSecondTemplate || '',
-    template2Type: cfg.whatsappSecondTemplateType || 'image',
-    delay: Number(cfg.whatsappSecondTemplateDelay) || 3,
-  };
-});
+ipcMain.handle('set-whatsapp-settings', () => fixedWhatsAppSettings());
 
 ipcMain.handle('get-rotate-setting', () => isRotate180Enabled());
 
